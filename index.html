@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Nyan Flappy Runner</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #333;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+            font-family: 'Courier New', Courier, monospace;
+        }
+
+        canvas {
+            background-color: #003366; /* Fallback deep blue if bg image fails */
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+            max-width: 100%;
+            max-height: 100vh;
+        }
+    </style>
+</head>
+<body>
+
+<canvas id="gameCanvas" width="480" height="800"></canvas>
+
+<script>
+    // ==========================================
+    // CONFIGURATION & ASSETS
+    // ==========================================
+    
+    // PATHS: Change these if your files are named differently
+    const ASSET_PATHS = {
+        sprite:     "assets/nyan_cat.png",
+        background: "assets/background.png",
+        obstacle:   "assets/obstacle.png",
+        music:      "assets/nyan_music.mp3",
+        sfxMeow:    "assets/meow.wav"
+    };
+
+    // GAMEPLAY TUNING: Adjust these to change difficulty
+    const CONFIG = {
+        gravity: 0.25,        // Downward force
+        flapStrength: -6,    // Upward force (negative is up)
+        speed: 3,            // Horizontal scroll speed
+        spawnRate: 140,      // Frames between pipe spawns
+        gapSize: 180,        // Vertical space between pipes
+        catX: 50,            // Horizontal starting position
+        catSize: 40,         // Width/Height of the cat hitbox
+        pipeWidth: 60        // Width of obstacles
+    };
+
+    // ==========================================
+    // INITIALIZATION
+    // ==========================================
+    
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    // Load Images
+    const nyanImg = new Image();
+    nyanImg.src = ASSET_PATHS.sprite;
+
+    const bgImg = new Image();
+    bgImg.src = ASSET_PATHS.background;
+
+    const obstacleImg = new Image();
+    obstacleImg.src = ASSET_PATHS.obstacle;
+
+    // Load Audio
+    const music = new Audio(ASSET_PATHS.music);
+    music.loop = true;
+    
+    const meowSfx = new Audio(ASSET_PATHS.sfxMeow);
+
+    // Game State
+    let frames = 0;
+    let score = 0;
+    let bestScore = localStorage.getItem('nyanFlappyBest') || 0;
+    let currentState = 'START'; // START, PLAYING, GAMEOVER
+
+    // Objects
+    const cat = {
+        x: CONFIG.catX,
+        y: canvas.height / 2,
+        w: CONFIG.catSize,
+        h: CONFIG.catSize, // You might want w > h for Nyan Cat (e.g., 60, 40)
+        velocity: 0,
+        rotation: 0,
+        
+        draw: function() {
+            ctx.save();
+            ctx.translate(this.x + this.w/2, this.y + this.h/2);
+            // Rotate based on velocity for visual flair
+            ctx.rotate(Math.min(Math.PI / 4, Math.max(-Math.PI / 4, (this.velocity * 0.1))));
+            
+            if (nyanImg.complete && nyanImg.naturalWidth !== 0) {
+                ctx.drawImage(nyanImg, -this.w/2, -this.h/2, this.w, this.h);
+            } else {
+                // Fallback: Pink Box
+                ctx.fillStyle = '#ff99cc';
+                ctx.fillRect(-this.w/2, -this.h/2, this.w, this.h);
+                ctx.strokeStyle = '#fff';
+                ctx.strokeRect(-this.w/2, -this.h/2, this.w, this.h);
+            }
+            ctx.restore();
+        },
+        
+        flap: function() {
+            this.velocity = CONFIG.flapStrength;
+        },
+        
+        update: function() {
+            this.velocity += CONFIG.gravity;
+            this.y += this.velocity;
+            
+            // Floor collision
+            if (this.y + this.h >= canvas.height) {
+                this.y = canvas.height - this.h;
+                gameOver();
+            }
+            
+            // Ceiling collision (optional, usually good to prevent flying over pipes)
+            if (this.y < 0) {
+                this.y = 0;
+                this.velocity = 0;
+            }
+        }
+    };
+
+    const pipes = {
+        items: [],
+        
+        reset: function() {
+            this.items = [];
+        },
+        
+        update: function() {
+            // Add new pipe
+            if (frames % CONFIG.spawnRate === 0) {
+                // Random Y position for the gap
+                // We want the gap to be somewhere reasonable
+                // Min Y = 50, Max Y = canvas.height - 50 - gap
+                const maxY = canvas.height - 150 - CONFIG.gapSize;
+                const minY = 100;
+                const topPipeHeight = Math.floor(Math.random() * (maxY - minY + 1)) + minY;
+                
+                this.items.push({
+                    x: canvas.width,
+                    topY: topPipeHeight, // Height of top pipe
+                    bottomY: topPipeHeight + CONFIG.gapSize, // Y start of bottom pipe
+                    passed: false
+                });
+            }
+            
+            // Move pipes
+            for (let i = 0; i < this.items.length; i++) {
+                let p = this.items[i];
+                p.x -= CONFIG.speed;
+                
+                // Collision Detection
+                // 1. Top Pipe
+                if (
+                    cat.x < p.x + CONFIG.pipeWidth &&
+                    cat.x + cat.w > p.x &&
+                    cat.y < p.topY
+                ) {
+                    gameOver();
+                }
+                
+                // 2. Bottom Pipe
+                if (
+                    cat.x < p.x + CONFIG.pipeWidth &&
+                    cat.x + cat.w > p.x &&
+                    cat.y + cat.h > p.bottomY
+                ) {
+                    gameOver();
+                }
+                
+                // Score Update
+                if (p.x + CONFIG.pipeWidth < cat.x && !p.passed) {
+                    score++;
+                    p.passed = true;
+                    // Optional: Slight difficulty increase
+                    // CONFIG.speed += 0.01; 
+                }
+                
+                // Remove off-screen pipes
+                if (p.x + CONFIG.pipeWidth < 0) {
+                    this.items.shift();
+                    i--;
+                }
+            }
+        },
+        
+        draw: function() {
+            for (let i = 0; i < this.items.length; i++) {
+                let p = this.items[i];
+                
+                if (obstacleImg.complete && obstacleImg.naturalWidth !== 0) {
+                    // Draw Top Pipe (flipped if needed, or just stretched)
+                    ctx.drawImage(obstacleImg, p.x, 0, CONFIG.pipeWidth, p.topY);
+                    
+                    // Draw Bottom Pipe
+                    ctx.drawImage(obstacleImg, p.x, p.bottomY, CONFIG.pipeWidth, canvas.height - p.bottomY);
+                } else {
+                    // Fallback: Green Rects
+                    ctx.fillStyle = '#2ecc71';
+                    ctx.fillRect(p.x, 0, CONFIG.pipeWidth, p.topY); // Top
+                    ctx.fillRect(p.x, p.bottomY, CONFIG.pipeWidth, canvas.height - p.bottomY); // Bottom
+                    
+                    // Borders
+                    ctx.strokeStyle = '#27ae60';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(p.x, 0, CONFIG.pipeWidth, p.topY);
+                    ctx.strokeRect(p.x, p.bottomY, CONFIG.pipeWidth, canvas.height - p.bottomY);
+                }
+            }
+        }
+    };
+
+    const background = {
+        x: 0,
+        draw: function() {
+            if (bgImg.complete && bgImg.naturalWidth !== 0) {
+                // Simple parallax scrolling
+                // Draw two copies of the image to make it loop
+                ctx.drawImage(bgImg, this.x, 0, canvas.width, canvas.height);
+                ctx.drawImage(bgImg, this.x + canvas.width, 0, canvas.width, canvas.height);
+                
+                if (currentState === 'PLAYING') {
+                    this.x -= 1; // Scroll speed (slower than pipes usually looks better)
+                    if (this.x <= -canvas.width) {
+                        this.x = 0;
+                    }
+                }
+            } else {
+                // Fallback: Deep Space Blue
+                ctx.fillStyle = '#003366';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                
+                // Draw some simple stars
+                ctx.fillStyle = '#FFF';
+                for(let i=0; i<20; i++) {
+                   // Pseudo-random stars just for visuals
+                   ctx.fillRect((i*57 + frames)%canvas.width, (i*93)%canvas.height, 2, 2);
+                }
+            }
+        }
+    };
+
+    // ==========================================
+    // GAME LOOPS & LOGIC
+    // ==========================================
+
+    function init() {
+        score = 0;
+        frames = 0;
+        cat.y = canvas.height / 2;
+        cat.velocity = 0;
+        pipes.reset();
+        currentState = 'START';
+        background.x = 0;
+        // loop() call removed from here to prevent stacking loops
+    }
+
+    function startGame() {
+        currentState = 'PLAYING';
+        // Play Music (User interaction required first)
+        music.currentTime = 0;
+        music.play().catch(e => console.log("Audio play failed (user interaction needed):", e));
+        cat.flap();
+    }
+
+    function gameOver() {
+        currentState = 'GAMEOVER';
+        music.pause();
+        meowSfx.play().catch(e => console.log("SFX failed:", e));
+        
+        if (score > bestScore) {
+            bestScore = score;
+            localStorage.setItem('nyanFlappyBest', bestScore);
+        }
+    }
+
+    function update() {
+        if (currentState === 'PLAYING') {
+            cat.update();
+            pipes.update();
+            frames++;
+        }
+    }
+
+    function draw() {
+        // Clear
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // 1. Background
+        background.draw();
+
+        // 2. Pipes
+        pipes.draw();
+
+        // 3. Cat
+        cat.draw();
+
+        // 4. UI
+        ctx.fillStyle = '#FFF';
+        ctx.font = 'bold 50px "Courier New"';
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 3;
+        ctx.textAlign = 'center';
+
+        if (currentState === 'START') {
+            ctx.strokeText("NYAN FLAPPY", canvas.width/2, 200);
+            ctx.fillText("NYAN FLAPPY", canvas.width/2, 200);
+            
+            ctx.font = '20px "Courier New"';
+            ctx.fillText("Tap or Space to Start", canvas.width/2, 250);
+            ctx.fillText("Best: " + bestScore, canvas.width/2, 300);
+        } 
+        else if (currentState === 'PLAYING') {
+            ctx.strokeText(score, canvas.width/2, 80);
+            ctx.fillText(score, canvas.width/2, 80);
+        } 
+        else if (currentState === 'GAMEOVER') {
+            ctx.strokeText("GAME OVER", canvas.width/2, 200);
+            ctx.fillText("GAME OVER", canvas.width/2, 200);
+            
+            ctx.font = '30px "Courier New"';
+            ctx.strokeText("Score: " + score, canvas.width/2, 260);
+            ctx.fillText("Score: " + score, canvas.width/2, 260);
+            
+            ctx.font = '20px "Courier New"';
+            ctx.fillText("Tap to Restart", canvas.width/2, 350);
+            ctx.fillText("Best: " + bestScore, canvas.width/2, 400);
+        }
+    }
+
+    function loop() {
+        update();
+        draw();
+        requestAnimationFrame(loop);
+    }
+
+    // ==========================================
+    // INPUT HANDLING
+    // ==========================================
+
+    function handleInput(e) {
+        // Prevent default behavior for specific keys to stop scrolling
+        if (e.type === 'keydown' && (e.code === 'Space' || e.code === 'ArrowUp')) {
+            e.preventDefault();
+        }
+
+        switch (currentState) {
+            case 'START':
+                startGame();
+                break;
+            case 'PLAYING':
+                cat.flap();
+                break;
+            case 'GAMEOVER':
+                // Small delay or check to prevent accidental restarts immediately after death
+                init();
+                startGame(); // Immediate restart logic
+                break;
+        }
+    }
+
+    // Keyboard
+    window.addEventListener('keydown', function(e) {
+        if (e.code === 'Space' || e.code === 'ArrowUp') {
+            handleInput(e);
+        }
+    });
+
+    // Mouse / Touch
+    canvas.addEventListener('mousedown', handleInput);
+    canvas.addEventListener('touchstart', function(e) {
+        e.preventDefault(); // Prevent scrolling on mobile
+        handleInput(e);
+    }, { passive: false });
+
+    // Start
+    init();
+    loop(); // Called only once here to start the render loop
+
+</script>
+</body>
+</html>
