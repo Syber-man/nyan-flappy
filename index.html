@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Nyan Flappy Runner</title>
+    <!-- New: Load the retro font from Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
     <style>
         body {
             margin: 0;
@@ -14,7 +16,8 @@
             align-items: center;
             height: 100vh;
             overflow: hidden;
-            font-family: 'Courier New', Courier, monospace;
+            /* New: Set the default font for the body */
+            font-family: 'Press Start 2P', cursive; 
         }
 
         canvas {
@@ -258,6 +261,9 @@
     // GAME LOOPS & LOGIC
     // ==========================================
 
+    // Use a variable to track the animation frame request ID
+    let animationFrameId = null;
+
     function init() {
         score = 0;
         frames = 0;
@@ -266,7 +272,6 @@
         pipes.reset();
         currentState = 'START';
         background.x = 0;
-        // loop() call removed from here to prevent stacking loops
     }
 
     function startGame() {
@@ -311,16 +316,17 @@
 
         // 4. UI
         ctx.fillStyle = '#FFF';
-        ctx.font = 'bold 50px "Courier New"';
+        // Change font usage in canvas drawing:
+        ctx.font = 'bold 30px "Press Start 2P"'; // Smaller size for visibility with new font
         ctx.strokeStyle = '#000';
-        ctx.lineWidth = 3;
+        ctx.lineWidth = 4;
         ctx.textAlign = 'center';
 
         if (currentState === 'START') {
             ctx.strokeText("NYAN FLAPPY", canvas.width/2, 200);
             ctx.fillText("NYAN FLAPPY", canvas.width/2, 200);
             
-            ctx.font = '20px "Courier New"';
+            ctx.font = '16px "Press Start 2P"';
             ctx.fillText("Tap or Space to Start", canvas.width/2, 250);
             ctx.fillText("Best: " + bestScore, canvas.width/2, 300);
         } 
@@ -332,11 +338,11 @@
             ctx.strokeText("GAME OVER", canvas.width/2, 200);
             ctx.fillText("GAME OVER", canvas.width/2, 200);
             
-            ctx.font = '30px "Courier New"';
+            ctx.font = '20px "Press Start 2P"';
             ctx.strokeText("Score: " + score, canvas.width/2, 260);
             ctx.fillText("Score: " + score, canvas.width/2, 260);
             
-            ctx.font = '20px "Courier New"';
+            ctx.font = '16px "Press Start 2P"';
             ctx.fillText("Tap to Restart", canvas.width/2, 350);
             ctx.fillText("Best: " + bestScore, canvas.width/2, 400);
         }
@@ -345,7 +351,7 @@
     function loop() {
         update();
         draw();
-        requestAnimationFrame(loop);
+        animationFrameId = requestAnimationFrame(loop);
     }
 
     // ==========================================
