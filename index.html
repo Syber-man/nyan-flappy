@@ -10,30 +10,23 @@
             margin: 0;
             padding: 0;
             background-color: #333;
-            display: flex;
-            justify-content: center;
-            align-items: center;
             height: 100vh;
-            overflow: hidden;
+            width: 100vw;
+            overflow: hidden; /* Prevents scrolling */
             font-family: 'Press Start 2P', cursive; 
-            touch-action: none; /* Disables double-tap to zoom */
+            touch-action: none; /* Disables zooming */
         }
 
         canvas {
-            background-color: #003366; 
-            box-shadow: 0 0 20px rgba(0,0,0,0.5);
-            /* Ensure the canvas scales nicely but keeps aspect ratio */
+            display: block;
             width: 100%;
-            height: auto;
-            max-width: 480px; /* Max width for desktop/tablet */
-            aspect-ratio: 480/800; /* Force the shape */
+            height: 100%;
             image-rendering: pixelated; /* Keeps pixel art crisp */
         }
     </style>
 </head>
 <body>
 
-<!-- Removed fixed width/height attributes here, handled in JS -->
 <canvas id="gameCanvas"></canvas>
 
 <script>
@@ -53,26 +46,30 @@
         gravity: 0.25,
         flapStrength: -6,
         speed: 3,
-        spawnRate: 140,
-        gapSize: 180,
+        spawnRate: 140, // Frames between pipes
+        gapSize: 190,   // Slightly larger gap for mobile playability
         catX: 50,
-        pipeWidth: 60,
-        // Virtual Resolution (Internal game size)
-        gameWidth: 480,
-        gameHeight: 800
+        pipeWidth: 60
     };
 
     // ==========================================
-    // INITIALIZATION
+    // INITIALIZATION & RESIZING
     // ==========================================
     
     const canvas = document.getElementById('gameCanvas');
     const ctx = canvas.getContext('2d');
 
-    // Set internal resolution match config
-    canvas.width = CONFIG.gameWidth;
-    canvas.height = CONFIG.gameHeight;
+    // Function to set canvas size to full screen
+    function resize() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+    }
+    
+    // Listen for resize events (e.g. rotating phone)
+    window.addEventListener('resize', resize);
+    resize(); // Set initial size
 
+    // Load Assets
     const nyanImg = new Image(); nyanImg.src = ASSET_PATHS.sprite;
     const bgImg = new Image(); bgImg.src = ASSET_PATHS.background;
     const obstacleImg = new Image(); obstacleImg.src = ASSET_PATHS.obstacle;
@@ -88,16 +85,17 @@
     // Objects
     const cat = {
         x: CONFIG.catX,
-        y: canvas.height / 2,
-        w: 60,
-        h: 40,
+        y: 300, // Default Y
+        w: 60,  // User preferred width
+        h: 40,  // User preferred height
         velocity: 0,
-        rotation: 0,
         
         draw: function() {
             ctx.save();
             ctx.translate(this.x + this.w/2, this.y + this.h/2);
-            ctx.rotate(Math.min(Math.PI / 4, Math.max(-Math.PI / 4, (this.velocity * 0.1))));
+            // Visual rotation
+            let rot = Math.min(Math.PI / 4, Math.max(-Math.PI / 4, (this.velocity * 0.1)));
+            ctx.rotate(rot);
             
             if (nyanImg.complete && nyanImg.naturalWidth !== 0) {
                 ctx.drawImage(nyanImg, -this.w/2, -this.h/2, this.w, this.h);
@@ -118,10 +116,12 @@
             this.velocity += CONFIG.gravity;
             this.y += this.velocity;
             
+            // Floor collision
             if (this.y + this.h >= canvas.height) {
                 this.y = canvas.height - this.h;
                 gameOver();
             }
+            // Ceiling collision
             if (this.y < 0) {
                 this.y = 0;
                 this.velocity = 0;
@@ -135,10 +135,17 @@
         
         update: function() {
             if (frames % CONFIG.spawnRate === 0) {
-                const maxY = canvas.height - 150 - CONFIG.gapSize;
-                const minY = 100;
-                const topPipeHeight = Math.floor(Math.random() * (maxY - minY + 1)) + minY;
+                // Dynamic gap calculation based on CURRENT screen height
+                // Leaves at least 100px buffer at top and bottom
+                const minPipe = 100;
+                const maxPos = canvas.height - minPipe - CONFIG.gapSize;
                 
+                // Safe calculation for top pipe Y
+                let topPipeHeight = Math.floor(Math.random() * (maxPos - minPipe + 1)) + minPipe;
+                
+                // Safety check if screen is too short
+                if (maxPos < minPipe) topPipeHeight = minPipe;
+
                 this.items.push({
                     x: canvas.width,
                     topY: topPipeHeight,
@@ -151,17 +158,18 @@
                 let p = this.items[i];
                 p.x -= CONFIG.speed;
                 
-                // Collision
+                // Collision Logic
                 if (cat.x < p.x + CONFIG.pipeWidth && cat.x + cat.w > p.x && (cat.y < p.topY || cat.y + cat.h > p.bottomY)) {
                     gameOver();
                 }
                 
-                // Score
+                // Score Logic
                 if (p.x + CONFIG.pipeWidth < cat.x && !p.passed) {
                     score++;
                     p.passed = true;
                 }
                 
+                // Cleanup
                 if (p.x + CONFIG.pipeWidth < 0) {
                     this.items.shift();
                     i--;
@@ -192,6 +200,7 @@
         x: 0,
         draw: function() {
             if (bgImg.complete && bgImg.naturalWidth !== 0) {
+                // Scale background to cover height
                 ctx.drawImage(bgImg, this.x, 0, canvas.width, canvas.height);
                 ctx.drawImage(bgImg, this.x + canvas.width, 0, canvas.width, canvas.height);
                 if (currentState === 'PLAYING') {
@@ -210,12 +219,12 @@
     };
 
     // ==========================================
-    // GAME LOOPS (FIXED FPS)
+    // GAME LOOP (60 FPS LOCKED)
     // ==========================================
 
     let lastTime = 0;
     const fps = 60;
-    const interval = 1000 / fps; // 16.67ms per frame
+    const interval = 1000 / fps;
 
     function init() {
         score = 0;
@@ -263,39 +272,37 @@
         ctx.strokeStyle = '#000';
         ctx.lineWidth = 4;
         ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle'; // Helps vertical centering
+
+        const centerX = canvas.width / 2;
+        const centerY = canvas.height / 2;
 
         if (currentState === 'START') {
-            ctx.strokeText("NYAN FLAPPY", canvas.width/2, 200);
-            ctx.fillText("NYAN FLAPPY", canvas.width/2, 200);
+            ctx.strokeText("NYAN FLAPPY", centerX, centerY - 50);
+            ctx.fillText("NYAN FLAPPY", centerX, centerY - 50);
             ctx.font = '16px "Press Start 2P"';
-            ctx.fillText("Tap to Start", canvas.width/2, 250);
-            ctx.fillText("Best: " + bestScore, canvas.width/2, 300);
+            ctx.fillText("Tap to Start", centerX, centerY + 20);
+            ctx.fillText("Best: " + bestScore, centerX, centerY + 60);
         } else if (currentState === 'PLAYING') {
-            ctx.strokeText(score, canvas.width/2, 80);
-            ctx.fillText(score, canvas.width/2, 80);
+            ctx.strokeText(score, centerX, 80);
+            ctx.fillText(score, centerX, 80);
         } else if (currentState === 'GAMEOVER') {
-            ctx.strokeText("GAME OVER", canvas.width/2, 200);
-            ctx.fillText("GAME OVER", canvas.width/2, 200);
+            ctx.strokeText("GAME OVER", centerX, centerY - 50);
+            ctx.fillText("GAME OVER", centerX, centerY - 50);
             ctx.font = '20px "Press Start 2P"';
-            ctx.strokeText("Score: " + score, canvas.width/2, 260);
-            ctx.fillText("Score: " + score, canvas.width/2, 260);
+            ctx.strokeText("Score: " + score, centerX, centerY + 20);
+            ctx.fillText("Score: " + score, centerX, centerY + 20);
             ctx.font = '16px "Press Start 2P"';
-            ctx.fillText("Tap to Restart", canvas.width/2, 350);
+            ctx.fillText("Tap to Restart", centerX, centerY + 70);
         }
     }
 
-    // New Loop with Delta Time Check
     function loop(timestamp) {
         requestAnimationFrame(loop);
-
-        // Calculate time elapsed
         const deltaTime = timestamp - lastTime;
 
-        // Only update if enough time has passed (Limit to 60 FPS)
         if (deltaTime >= interval) {
-            // Adjust lastTime to be a multiple of interval to prevent drift
             lastTime = timestamp - (deltaTime % interval);
-
             update();
             draw();
         }
@@ -316,7 +323,7 @@
     canvas.addEventListener('touchstart', e => { e.preventDefault(); handleInput(e); }, { passive: false });
 
     init();
-    requestAnimationFrame(loop); // Start the loop
+    requestAnimationFrame(loop);
 
 </script>
 </body>
